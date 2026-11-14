@@ -49,6 +49,7 @@ export default defineConfig({
                 "resources/css/buyer-confirmation.css",
                 "resources/css/lgu-transaction-verification.css",
                 "resources/css/dispute-resolution.css",
+                "resources/css/transactions-history.css",
 
                 // Tools & Administration
                 "resources/css/calculator.css",
@@ -74,7 +75,7 @@ export default defineConfig({
                 // ==========================================
 
                 // Core & Layout
-                "resources/js/App.js",
+                "resources/js/app.js",
                 "resources/js/layouts/app-shell.js",
 
                 // Authentication
@@ -120,6 +121,7 @@ export default defineConfig({
                 "resources/js/pages/buyer-confirmation.js",
                 "resources/js/pages/lgu-transaction-verification.js",
                 "resources/js/pages/dispute-resolution.js",
+                "resources/js/pages/transactions-history.js",
 
                 // Tools & Administration
                 "resources/js/pages/calculator.js",
