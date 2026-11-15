@@ -179,7 +179,7 @@ class TransactionSubmissionTest extends TestCase
         Bus::assertNotDispatched(SendBuyerConfirmationSms::class);
     }
 
-    public function test_transaction_without_buyer_phone_cannot_be_submitted(): void
+    public function test_transaction_without_buyer_phone_can_be_submitted_for_lgu_verification(): void
     {
         $farmer = $this->createFarmer();
 
@@ -189,12 +189,12 @@ class TransactionSubmissionTest extends TestCase
             ->postJson(
                 "/api/farmer/transactions/{$transaction->id}/submit"
             )
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors(['buyer_phone']);
+            ->assertOk()
+            ->assertJsonPath('data.status', 'pending_lgu_verification');
 
         $this->assertDatabaseHas('transactions', [
             'id' => $transaction->id,
-            'status' => 'draft',
+            'status' => 'pending_lgu_verification',
         ]);
 
         Bus::assertNotDispatched(SendBuyerConfirmationSms::class);
@@ -233,11 +233,11 @@ class TransactionSubmissionTest extends TestCase
                 "/api/farmer/transactions/{$transaction->id}/submit"
             )
             ->assertOk()
-            ->assertJsonPath('data.status', 'pending');
+            ->assertJsonPath('data.status', 'pending_lgu_verification');
 
         $this->assertDatabaseHas('transactions', [
             'id' => $transaction->id,
-            'status' => 'pending',
+            'status' => 'pending_lgu_verification',
         ]);
 
         $this->assertDatabaseHas('livestock_records', [
@@ -245,58 +245,16 @@ class TransactionSubmissionTest extends TestCase
             'status' => 'in_transaction',
         ]);
 
-        $this->assertDatabaseHas('buyer_confirmations', [
-            'transaction_id' => $transaction->id,
-            'buyer_phone' => '09123456789',
-            'status' => 'pending',
-        ]);
+        $this->assertSame(0, $transaction->buyerConfirmations()->count());
 
         $this->assertDatabaseHas('transaction_status_logs', [
             'transaction_id' => $transaction->id,
             'from_status' => 'draft',
-            'to_status' => 'pending',
+            'to_status' => 'pending_lgu_verification',
             'actor_type' => 'farmer',
         ]);
 
-        Bus::assertDispatched(
-            SendBuyerConfirmationSms::class,
-            1
-        );
-    }
-
-
-    public function test_confirmation_token_is_stored_as_hash(): void
-    {
-        $farmer = $this->createFarmer();
-        $transaction = $this->createDraft($farmer);
-
-        $this->actingAs($farmer)
-            ->postJson(
-                "/api/farmer/transactions/{$transaction->id}/submit"
-            )
-            ->assertOk();
-
-        $confirmation = $transaction
-            ->buyerConfirmations()
-            ->firstOrFail();
-
-        $this->assertSame(
-            64,
-            strlen($confirmation->token_hash)
-        );
-
-        $this->assertNotEmpty(
-            $confirmation->transaction_snapshot_hash
-        );
-
-        Bus::assertDispatched(
-            SendBuyerConfirmationSms::class,
-            function ($job) use ($confirmation, $transaction) {
-                return $job->transactionId === $transaction->id
-                    && hash('sha256', $job->token)
-                    === $confirmation->token_hash;
-            }
-        );
+        Bus::assertNotDispatched(SendBuyerConfirmationSms::class);
     }
 
 
@@ -316,15 +274,9 @@ class TransactionSubmissionTest extends TestCase
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['status']);
 
-        $this->assertSame(
-            1,
-            $transaction->buyerConfirmations()->count()
-        );
+        $this->assertSame(0, $transaction->buyerConfirmations()->count());
 
-        Bus::assertDispatched(
-            SendBuyerConfirmationSms::class,
-            1
-        );
+        Bus::assertNotDispatched(SendBuyerConfirmationSms::class);
     }
 
     public function test_unavailable_livestock_cannot_be_submitted(): void

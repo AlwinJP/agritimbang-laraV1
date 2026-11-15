@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
     AdminUserController,
     AuctionHouseTransactionController,
+    AuctionScheduleController,
+    AuctionFarmerFollowUpController,
     AuditLogController,
     AuthController,
     BarangayController,
@@ -13,6 +15,7 @@ use App\Http\Controllers\{
     BuyerConfirmationController,
     DashboardController,
     FarmerDirectoryController,
+    FarmerDashboardController,
     FarmerLivestockController,
     FarmerProfileController,
     FarmerTransactionController,
@@ -43,7 +46,10 @@ use App\Http\Controllers\{
     UserVerificationController,
     ProfileController,
     PriceRecommendationController,
-    LguTransactionEncodingController
+    WeeklyPriceRecommendationController,
+    LguTransactionEncodingController,
+    ManualWeightEstimationController,
+    ManualValuationPreviewController
 };
 
 /*
@@ -113,6 +119,29 @@ Route::prefix('reference')->group(function () {
         'referenceBySpecies'
     ]);
 });
+
+/*
+|--------------------------------------------------------------------------
+| CALCULATOR PREVIEW ENDPOINTS
+|--------------------------------------------------------------------------
+| These endpoints calculate from temporary inputs. They do not create a
+| livestock record or persist calculation history.
+*/
+Route::post('calculator/weight-estimation/preview', [
+    ManualWeightEstimationController::class,
+    'preview',
+])->middleware([
+    'auth:sanctum',
+    'role:farmer,lgu_encoder,lgu_authority,admin',
+]);
+
+Route::post('calculator/valuation/preview', [
+    ManualValuationPreviewController::class,
+    'preview',
+])->middleware([
+    'auth:sanctum',
+    'role:farmer,lgu_encoder',
+]);
 
 /*
 |--------------------------------------------------------------------------
@@ -189,6 +218,12 @@ Route::prefix('admin')
         'role:admin'
     ])
     ->group(function () {
+
+        // Read-only transaction history (kept available even when hidden from sidebar).
+        Route::get('transactions/history', [
+            LguTransactionVerificationController::class,
+            'history',
+        ]);
 
         // Municipality management
     
@@ -415,6 +450,11 @@ Route::prefix('lgu')
     ->group(function () {
 
         Route::get(
+            'transactions/history',
+            [LguTransactionVerificationController::class, 'history']
+        );
+
+        Route::get(
             'transactions',
             [LguTransactionVerificationController::class, 'index']
         );
@@ -486,6 +526,10 @@ Route::prefix('lgu')
                 ]);
             });
 
+        // Read-only submission history for Authority (municipality-scoped).
+        Route::get('price-submissions', [PriceReferenceController::class, 'submissions']);
+        Route::get('price-submissions/{priceReference}', [PriceReferenceController::class, 'show']);
+
         // Official price validation
     
         Route::prefix('price-validations')
@@ -550,6 +594,31 @@ Route::prefix('lgu')
     ])
     ->group(function () {
 
+        // Auction schedule management for the assigned Encoder municipality.
+        Route::prefix('auction-schedules')->group(function () {
+            Route::get('/venues', [AuctionScheduleController::class, 'venues']);
+            Route::get('/', [AuctionScheduleController::class, 'encoderIndex']);
+            Route::post('/', [AuctionScheduleController::class, 'store']);
+            Route::get('{schedule}/registrations', [AuctionScheduleController::class, 'encoderRegistrations']);
+            Route::get('{schedule}', [AuctionScheduleController::class, 'encoderShow']);
+            Route::patch('{schedule}', [AuctionScheduleController::class, 'update']);
+            Route::patch('{schedule}/status', [AuctionScheduleController::class, 'changeStatus']);
+        });
+
+        // Optional auction-house assignment status. An encoder may have no
+        // assignment and still use the municipality-level LGU workflows.
+        Route::get('encoder/auction-house-assignment', [
+            LguAuctionHouseController::class,
+            'encoderAssignmentStatus',
+        ]);
+
+        // Encoder history endpoint used by the staff transaction-history page.
+        Route::prefix('encoder')->group(function () {
+            Route::get('transactions/history', [
+                LguTransactionEncodingController::class,
+                'history',
+            ]);
+        });
 
         // LGU Encoder transaction encoding
         Route::prefix('transactions/encoding')->group(function () {
@@ -562,6 +631,16 @@ Route::prefix('lgu')
                 LguTransactionEncodingController::class,
                 'livestock',
             ]);
+            Route::post('farmers/{farmer}/livestock', [
+                LguTransactionEncodingController::class,
+                'quickAddLivestock',
+            ]);
+
+            Route::get('auction-schedules', [
+                LguTransactionEncodingController::class,
+                'transactionAuctionSchedules',
+            ]);
+
 
             Route::post('/', [
                 LguTransactionEncodingController::class,
@@ -629,11 +708,6 @@ Route::prefix('lgu')
             'show'
         ]);
 
-        Route::patch('livestock/{livestock}', [
-            LguLivestockController::class,
-            'update'
-        ]);
-
         // Weight estimation
     
         Route::get('livestock/{livestock}/weight-estimations', [
@@ -671,6 +745,20 @@ Route::prefix('farmer')
         'role:farmer'
     ])
     ->group(function () {
+
+        // Farmer auction schedule discovery and livestock registration.
+        Route::get('auction-schedules', [AuctionScheduleController::class, 'farmerIndex']);
+        Route::get('auction-schedules/{schedule}', [AuctionScheduleController::class, 'farmerShow']);
+        Route::get('auction-schedules/{schedule}/eligible-livestock', [AuctionScheduleController::class, 'farmerEligibleLivestock']);
+        Route::post('auction-schedules/{schedule}/registrations', [AuctionScheduleController::class, 'register']);
+        Route::get('auction-registrations', [AuctionScheduleController::class, 'farmerRegistrations']);
+        Route::get('auction-registration-filters', [AuctionScheduleController::class, 'farmerRegistrationFilters']);
+        Route::post('auction-registrations/{registration}/withdraw', [AuctionScheduleController::class, 'withdraw']);
+        Route::get('auction-follow-ups', [AuctionFarmerFollowUpController::class, 'farmerIndex']);
+        Route::post('auction-follow-ups/{followUp}/respond', [AuctionFarmerFollowUpController::class, 'respond']);
+
+        // Farmer dashboard monthly summary
+        Route::get('dashboard-summary', [FarmerDashboardController::class, 'summary']);
 
         // Farmer profile
     
@@ -731,6 +819,11 @@ Route::prefix('farmer')
             'update'
         ]);
 
+        Route::delete('livestock/{livestock}', [
+            FarmerLivestockController::class,
+            'destroy'
+        ]);
+
         Route::patch('livestock/{livestock}/status', [
             FarmerLivestockController::class,
             'updateStatus'
@@ -762,6 +855,21 @@ Route::prefix('farmer')
 
         // Transactions
     
+        Route::get('transactions', [
+            FarmerTransactionController::class,
+            'index'
+        ]);
+
+        Route::get('transactions/{transaction}', [
+            FarmerTransactionController::class,
+            'show'
+        ]);
+
+        Route::patch('transactions/{transaction}', [
+            FarmerTransactionController::class,
+            'update'
+        ]);
+
         Route::post('transactions', [
             FarmerTransactionController::class,
             'store'
@@ -787,7 +895,16 @@ Route::prefix('farmer')
 |--------------------------------------------------------------------------
 */
 
+Route::middleware(['auth:sanctum', 'role:lgu_authority,lgu_encoder'])->group(function () {
+    Route::get('lgu/auction-follow-ups', [AuctionFarmerFollowUpController::class, 'lguIndex']);
+    Route::get('lgu/auction-follow-ups/{followUp}', [AuctionFarmerFollowUpController::class, 'lguShow']);
+});
+
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('weekly-price-recommendations', [WeeklyPriceRecommendationController::class, 'index']);
+    Route::post('weekly-price-recommendations/generate', [WeeklyPriceRecommendationController::class, 'generate']);
+    Route::get('weekly-price-recommendations/{recommendation}', [WeeklyPriceRecommendationController::class, 'show']);
+    Route::post('weekly-price-recommendations/{recommendation}/use', [WeeklyPriceRecommendationController::class, 'use']);
 
     // LGU transaction operations
 
@@ -1019,6 +1136,22 @@ Route::get('lgu/livestock', [
             'role:admin,lgu_authority,lgu_encoder'
         ]);
 
+Route::get('lgu/livestock/{livestock}', [
+    LguLivestockController::class,
+    'show'
+])->middleware([
+            'auth:sanctum',
+            'role:admin,lgu_authority,lgu_encoder'
+        ]);
+
+Route::patch('lgu/livestock/{livestock}', [
+    LguLivestockController::class,
+    'update'
+])->middleware([
+            'auth:sanctum',
+            'role:admin,lgu_authority,lgu_encoder'
+        ]);
+
 /*
 |--------------------------------------------------------------------------
 | 15. OFFICIAL LIVESTOCK PRICES
@@ -1030,7 +1163,7 @@ Route::get('official-prices', [
     'index'
 ])->middleware([
             'auth:sanctum',
-            'role:farmer,lgu_encoder,lgu_authority'
+            'role:farmer,lgu_encoder,lgu_authority,admin'
         ]);
 
 

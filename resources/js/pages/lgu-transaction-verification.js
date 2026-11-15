@@ -7,6 +7,7 @@ const alertBox = $("verification-alert");
 const refreshButton = $("verification-refresh");
 const searchInput = $("verification-search");
 const statusInput = $("verification-status");
+const typeInput = $("verification-type");
 
 const dialog = $("verification-dialog");
 const closeButton = $("verification-close");
@@ -29,6 +30,18 @@ const state = {
 };
 
 const REVIEWABLE_STATUS = "pending_lgu_verification";
+
+function isReviewable(transaction) {
+    return transaction?.status === REVIEWABLE_STATUS ||
+        (transaction?.status === "pending" &&
+            (transaction?.source === "farmer" ||
+                transaction?.source === "lgu_encoder" ||
+                transaction?.source === "auction_house" ||
+                ["auction", "auction_sale"].includes(transaction?.transaction_type) ||
+                Boolean(transaction?.auction_schedule_id) ||
+                (transaction?.buyer_confirmations ?? []).some((item) => item.status === "confirmed") ||
+                (transaction?.status_logs ?? []).some((item) => item.to_status === REVIEWABLE_STATUS)));
+}
 
 const escapeHtml = (value) =>
     String(value ?? "").replace(
@@ -113,21 +126,30 @@ function encoderName(transaction) {
     if (!encoder) return "—";
 
     return (
-        [encoder.first_name, encoder.last_name].filter(Boolean).join(" ") || "—"
+        [encoder.first_name, encoder.middle_name, encoder.last_name].filter(Boolean).join(" ") || encoder.name || "—"
     );
 }
 
 function sourceLabel(transaction) {
     switch (transaction.source) {
-        case "farmer":
-            return "Farmer";
-        case "lgu_encoder":
-            return "LGU Encoder";
-        case "auction_house":
-            return "Auction House";
-        default:
-            return statusLabel(transaction.source);
+        case "farmer": return "Farmer";
+        case "lgu_encoder": return "LGU Encoder";
+        case "auction_house": return "Auction House";
+        default: return statusLabel(transaction.source);
     }
+}
+
+function isAuctionSale(transaction) {
+    return ["auction", "auction_sale"].includes(transaction?.transaction_type) ||
+        Boolean(transaction?.auction_schedule_id) ||
+        Boolean(transaction?.auction_schedule) ||
+        transaction?.source === "auction_house";
+}
+
+function transactionTypeLabel(transaction) {
+    return isAuctionSale(transaction)
+        ? "Auction Sale"
+        : "Backyard / Private Sale";
 }
 
 function apiError(error) {
@@ -173,12 +195,12 @@ function setProcessing(processing) {
     approveButton.disabled =
         processing ||
         !state.selected ||
-        state.selected.status !== REVIEWABLE_STATUS;
+        !isReviewable(state.selected);
 
     rejectButton.disabled =
         processing ||
         !state.selected ||
-        state.selected.status !== REVIEWABLE_STATUS;
+        !isReviewable(state.selected);
 
     closeButton.disabled = processing;
 
@@ -193,7 +215,7 @@ function updateStats() {
             (transaction) => transaction.status === status,
         ).length;
 
-    $("stat-pending").textContent = count("pending_lgu_verification");
+    $("stat-pending").textContent = state.transactions.filter(isReviewable).length;
 
     $("stat-verified").textContent = count("verified");
     $("stat-rejected").textContent = count("rejected");
@@ -211,15 +233,25 @@ function renderTransactions() {
             item.farmer?.farmer_code,
             item.buyer_name,
             item.source,
+            item.transaction_type,
+            item.auction_schedule?.title,
+            item.auction_schedule?.auction_house?.name,
             encoderName(item),
         ]
             .join(" ")
             .toLowerCase();
 
-        return (
-            (!search || searchable.includes(search)) &&
-            (!status || item.status === status)
-        );
+        // The API already applies the review_queue filter. It is a UI filter
+        // mode, not a persisted transaction status, so comparing a record's
+        // status directly with "review_queue" hides every result.
+        const statusMatches =
+            !status ||
+            status === "all" ||
+            (status === "review_queue"
+                ? isReviewable(item)
+                : item.status === status);
+
+        return (!search || searchable.includes(search)) && statusMatches;
     });
 
     if (!filtered.length) {
@@ -250,15 +282,15 @@ function renderTransactions() {
 
                 <td>${escapeHtml(item.buyer_name ?? "—")}</td>
 
-                <td>${escapeHtml(sourceLabel(item))}</td>
+                <td><strong>${escapeHtml(transactionTypeLabel(item))}</strong><div class="verification-muted">${escapeHtml(sourceLabel(item))}</div></td>
 
                 <td>
                     ${escapeHtml(formatMoney(item.total_selling_price))}
                 </td>
 
                 <td>
-                    <span class="verification-badge ${escapeHtml(item.status)}">
-                        ${escapeHtml(statusLabel(item.status))}
+                    <span class="verification-badge ${escapeHtml(isReviewable(item) ? "pending_lgu_verification" : item.status)}">
+                        ${escapeHtml(isReviewable(item) ? "Pending LGU Verification" : statusLabel(item.status))}
                     </span>
                 </td>
 
@@ -298,74 +330,43 @@ function renderLivestockItems(transaction) {
     }
 
     return `
-        <div class="verification-items">
-            <h3>Livestock & Valuation Details</h3>
-
-            ${items
-                .map((item, index) => {
-                    const livestock = item.livestock ?? {};
-
-                    const species = livestock.species?.name ?? "Livestock";
-
-                    const breed = livestock.breed?.name ?? "Unspecified";
-
-                    return `
-                        <div class="verification-item">
-                            <div class="verification-item-header">
-                                <strong>
-                                    ${index + 1}.
-                                    ${escapeHtml(species)}
-                                    —
-                                    ${escapeHtml(breed)}
-                                </strong>
-                            </div>
-
-                            <div class="verification-item-grid">
-                                ${renderDetail(
-                                    "Livestock ID",
-                                    item.livestock_id,
-                                )}
-
-                                ${renderDetail(
-                                    "Weight Used",
-                                    `${item.weight_used_kg ?? "—"} kg`,
-                                )}
-
-                                ${renderDetail(
-                                    "Reference Value",
-                                    formatMoney(item.reference_value),
-                                )}
-
-                                ${renderDetail(
-                                    "Actual Selling Price",
-                                    formatMoney(item.actual_selling_price),
-                                )}
-
-                                ${renderDetail(
-                                    "Price Difference",
-                                    formatMoney(item.price_difference),
-                                )}
-
-                                ${renderDetail(
-                                    "Deviation",
-                                    `${item.percentage_deviation ?? "—"}%`,
-                                )}
-
-                                ${renderDetail(
-                                    "Valuation ID",
-                                    item.valuation_id,
-                                )}
-
-                                ${renderDetail(
-                                    "Livestock Status",
-                                    statusLabel(livestock.status),
-                                )}
-                            </div>
-                        </div>
-                    `;
-                })
-                .join("")}
-        </div>
+        <section class="verification-items">
+            <div class="verification-items-heading">
+                <h3>Livestock & Valuation Details</h3>
+                <span class="verification-items-count">${items.length} ${items.length === 1 ? "item" : "items"}</span>
+            </div>
+            <div class="verification-items-table-wrap" role="region" aria-label="Livestock and valuation details" tabindex="0">
+                <table class="verification-items-table">
+                    <thead>
+                        <tr>
+                            <th>#</th><th>Livestock</th><th>Livestock ID</th><th>Weight Used</th>
+                            <th>Reference Value</th><th>Actual Selling Price</th><th>Price Difference</th>
+                            <th>Deviation</th><th>Valuation ID</th><th>Livestock Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item, index) => {
+                            const livestock = item.livestock ?? {};
+                            const species = livestock.species?.name ?? "Livestock";
+                            const breed = livestock.breed?.name ?? "Unspecified";
+                            return `
+                                <tr>
+                                    <td>${index + 1}</td>
+                                    <td><strong>${escapeHtml(species)}</strong><div class="verification-muted">${escapeHtml(breed)}</div></td>
+                                    <td>${escapeHtml(item.livestock_id ?? "—")}</td>
+                                    <td>${escapeHtml(item.weight_used_kg == null ? "—" : `${item.weight_used_kg} kg`)}</td>
+                                    <td>${escapeHtml(formatMoney(item.reference_value))}</td>
+                                    <td><strong>${escapeHtml(formatMoney(item.actual_selling_price))}</strong></td>
+                                    <td>${escapeHtml(formatMoney(item.price_difference))}</td>
+                                    <td>${escapeHtml(item.percentage_deviation == null ? "—" : `${item.percentage_deviation}%`)}</td>
+                                    <td>${escapeHtml(item.valuation_id ?? "—")}</td>
+                                    <td>${escapeHtml(statusLabel(livestock.status))}</td>
+                                </tr>`;
+                        }).join("")}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     `;
 }
 
@@ -376,8 +377,11 @@ function renderTransactionDetails(transaction) {
         ["Farmer Code", transaction.farmer?.farmer_code],
         ["Buyer", transaction.buyer_name],
         ["Buyer Phone", transaction.buyer_phone],
-        ["Source", sourceLabel(transaction)],
+        ["Sale Type", transactionTypeLabel(transaction)],
+        ["Recorded By", sourceLabel(transaction)],
         ["Encoded By", encoderName(transaction)],
+        ["Auction Event", isAuctionSale(transaction) ? (transaction.auction_schedule?.title || "Auction event") : "Not applicable"],
+        ["Auction Venue", isAuctionSale(transaction) ? (transaction.auction_schedule?.auction_house?.name || transaction.auction_schedule?.venue || "—") : "—"],
         ["Municipality", transaction.municipality?.name],
         ["Barangay", transaction.barangay?.name],
         ["Transaction Date", formatDate(transaction.transaction_date)],
@@ -440,7 +444,7 @@ async function openTransaction(transaction) {
         renderTransactionDetails(detail);
         setProcessing(false);
 
-        if (detail.status !== REVIEWABLE_STATUS) {
+        if (!isReviewable(detail)) {
             showDialogAlert(
                 "This transaction is not awaiting LGU verification. Review only.",
             );
@@ -481,7 +485,9 @@ async function loadTransactions() {
             const response = await api.get("/lgu/transactions", {
                 params: {
                     page,
-                    per_page: state.perPage,
+                    per_page: 100,
+                    status: statusInput.value || "review_queue",
+                    ...(typeInput?.value ? { transaction_type: typeInput.value } : {}),
                 },
             });
 
@@ -538,7 +544,7 @@ async function processDecision(action) {
     if (
         !transaction ||
         state.processing ||
-        transaction.status !== REVIEWABLE_STATUS
+        !isReviewable(transaction)
     ) {
         return;
     }
@@ -588,15 +594,11 @@ async function processDecision(action) {
             "success",
         );
     } catch (error) {
-        showDialogAlert(apiError(error));
-
-        // Refresh details if the transaction changed on the server.
-        if ([409, 422].includes(error.response?.status)) {
-            const previous = state.selected;
-            if (previous) {
-                await openTransaction(previous);
-            }
-        }
+        const status = error.response?.status;
+        const detail = apiError(error);
+        showDialogAlert(status ? `Request failed (${status}): ${detail}` : detail);
+        // Keep the selected transaction and dialog visible so the Authority
+        // can read validation/authorization errors instead of losing context.
     } finally {
         setProcessing(false);
     }
@@ -625,7 +627,8 @@ if (
 
     searchInput.addEventListener("input", renderTransactions);
 
-    statusInput.addEventListener("change", renderTransactions);
+    statusInput.addEventListener("change", loadTransactions);
+    typeInput?.addEventListener("change", loadTransactions);
 
     refreshButton.addEventListener("click", loadTransactions);
 
@@ -640,9 +643,17 @@ if (
         state.selected = null;
     });
 
-    approveButton.addEventListener("click", () => processDecision("approve"));
+    approveButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        processDecision("approve");
+    });
 
-    rejectButton.addEventListener("click", () => processDecision("reject"));
+    rejectButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        processDecision("reject");
+    });
 
     loadTransactions();
 }

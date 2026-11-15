@@ -1,0 +1,23 @@
+AGRITIMBANG FOLLOW-UP OVERLAY
+
+Included changes
+1. Livestock edit body condition now opens a modal checklist using the same seven questions and 1-5 scoring bands as the calculator valuation condition assessment.
+2. Livestock edit supports a livestock photo upload and preview. Farmer and LGU update services store the uploaded image on the public disk and replace the previous image only after the new upload is stored.
+3. Added the missing LGU livestock PATCH API route for the existing update action.
+4. Goat rump-height measurement is displayed for every goat in both manual weight estimation and existing livestock-record weight estimation, regardless of age group.
+5. Removed the requested explanatory photo/placeholder sentence from the Farmer auction livestock registration page. Photo and placeholder behavior remain unchanged.
+6. Encoder dashboard verified transaction counts and sales totals for the month/year are grouped by transaction_date, rather than verified_at, so the selected reporting period reflects when the transaction was recorded.
+
+Installation
+1. Extract this ZIP into the Laravel project root and merge/overwrite the included files.
+2. Run:
+   php artisan optimize:clear
+   php artisan storage:link
+   npm run build
+
+Notes
+- No database migration is required.
+- The existing UpdateLivestockRequest already validates photo uploads (JPG/JPEG/PNG/WEBP, maximum 5 MB).
+- The existing Farmer livestock update service already stores photos; this overlay adds equivalent handling to LGU livestock updates.
+- The monthly dashboard transaction count still counts verified transactions, but uses transaction_date to decide which month they belong to. The sales total uses the same date basis.
+- The overlay does not change AuctionRegistration.remarks; it remains an optional registration note and is displayed as a dash when empty.

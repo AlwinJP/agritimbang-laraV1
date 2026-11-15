@@ -1,0 +1,25 @@
+AGRITIMBANG — LIVESTOCK DIRECTORY WEIGHT COLUMN UPDATE
+
+What changed
+- The Livestock Directory Weight column now uses the same two-line visual hierarchy as the Species & Breed column.
+- Actual weight is displayed as the primary value with “Actual Weight” beneath it.
+- If no actual weight exists but an estimated weight exists, the estimated value is displayed with “Estimated Weight” beneath it.
+- If neither value exists, the cell displays “Not recorded”.
+- Numeric values display up to two decimal places, without repeating the kg unit in every row because the table column is already labeled Weight.
+- Actual weight takes priority over estimated weight.
+
+Files
+- resources/js/pages/livestock-directory.js
+
+Installation
+1. Extract this ZIP into the Laravel project root and merge/overwrite the included file.
+2. Run:
+   php artisan optimize:clear
+   npm run build
+3. Refresh the Livestock Directory page.
+
+No database migration is required. This is a display-only update and uses the existing actual_weight_kg and latest_weight_estimation.estimated_weight_kg response fields.
+
+Validation
+- JavaScript syntax checked with node --check.
+- Live browser/API testing was not performed.

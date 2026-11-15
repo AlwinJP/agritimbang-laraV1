@@ -4,7 +4,7 @@
     <main class="l55-page" id="l55-show" data-id="{{ $livestockId }}">
         <div class="l55-top">
             <a href="{{ url('/livestock') }}">← Back to livestock</a>
-            <span id="l55-status" class="l55-pill">Loading…</span>
+            <div class="l55-status-group"><span id="l55-status" class="l55-pill">Loading…</span><span id="l55-auction-status" class="l55-pill l55-auction-pill" hidden></span></div>
         </div>
 
         <header class="l55-header">
@@ -15,13 +15,16 @@
             </div>
 
 
-            <div>
+            <div class="l55-actions">
                 <a id="l55-edit-link" class="l55-primary" href="#" hidden>
                     Edit livestock
                 </a>
 
                 <a id="l55-estimate-link" class="l55-primary" href="#" hidden>
                     Estimate Weight
+                </a>
+                <a id="l55-valuation-link" class="l55-primary" href="#" hidden>
+                    Find Market Value
                 </a>
             </div>
         </header>

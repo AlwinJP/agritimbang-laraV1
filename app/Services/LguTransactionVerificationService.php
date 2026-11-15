@@ -3,6 +3,9 @@
 namespace App\Services;
 
 use App\Models\Transaction;
+use App\Models\AuctionRegistration;
+use App\Models\AuctionSchedule;
+use App\Models\AuctionFarmerFollowUp;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -44,6 +47,32 @@ class LguTransactionVerificationService
 
 
             $this->authorizeOfficer($officer, $transaction);
+
+            // Legacy farmer transactions may still carry the old `pending` status.
+            // Farmer declarations are reviewed by the LGU Authority directly;
+            // buyer confirmation is not a prerequisite for this workflow.
+            $legacyPendingIsReviewable =
+                in_array($transaction->source, ['farmer', 'lgu_encoder', 'auction_house'], true) ||
+                in_array($transaction->transaction_type, ['auction', 'auction_sale'], true) ||
+                $transaction->auction_schedule_id !== null ||
+                $transaction->buyerConfirmations()
+                    ->where('status', 'confirmed')
+                    ->exists() ||
+                $transaction->statusLogs()
+                    ->where('to_status', 'pending_lgu_verification')
+                    ->exists();
+
+            if ($transaction->status === 'pending' && $legacyPendingIsReviewable) {
+                $transaction->update(['status' => 'pending_lgu_verification']);
+                $transaction->statusLogs()->create([
+                    'from_status' => 'pending',
+                    'to_status' => 'pending_lgu_verification',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'remarks' => 'Legacy eligible transaction moved into the LGU review queue before the Authority decision.',
+                ]);
+                $transaction->refresh();
+            }
 
             $hasActiveDispute = $transaction->disputes()
                 ->whereIn('status', ['open', 'under_review'])
@@ -109,6 +138,38 @@ class LguTransactionVerificationService
                 $livestock->update([
                     'status' => $approved ? 'sold' : 'available',
                 ]);
+
+                if ($transaction->auction_schedule_id) {
+                    $registration = AuctionRegistration::query()
+                        ->where('auction_schedule_id', $transaction->auction_schedule_id)
+                        ->where('livestock_id', $livestock->id)
+                        ->where('farmer_id', $transaction->farmer_id)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($registration) {
+                        $schedule = AuctionSchedule::query()->find($transaction->auction_schedule_id);
+                        if ($approved) {
+                            $registration->update([
+                                'status' => 'completed',
+                                'active_livestock_id' => null,
+                                'remarks' => trim(($registration->remarks ? $registration->remarks . "\n" : '') . 'Auction sale verified by LGU Authority.'),
+                            ]);
+                        } elseif ($schedule && $schedule->status === 'ongoing') {
+                            $registration->update([
+                                'status' => 'registered',
+                                'active_livestock_id' => $livestock->id,
+                                'remarks' => trim(($registration->remarks ? $registration->remarks . "\n" : '') . 'Auction sale was rejected; livestock remains registered because the event is still ongoing.'),
+                            ]);
+                        } else {
+                            $registration->update([
+                                'status' => 'rejected',
+                                'active_livestock_id' => null,
+                                'remarks' => trim(($registration->remarks ? $registration->remarks . "\n" : '') . 'Auction sale was rejected after the event closed; registration was not reopened.'),
+                            ]);
+                        }
+                    }
+                }
             }
 
             $newStatus = $approved ? 'verified' : 'rejected';
@@ -154,8 +215,21 @@ class LguTransactionVerificationService
             'An active, verified LGU officer is required.'
         );
 
+        $transactionMunicipalityId = $transaction->municipality_id;
+        $farmerMunicipalityId = $transaction->farmer?->municipality_id;
+
+        // Some older farmer-created records relied on the farmer profile for
+        // municipality scope. Safely backfill a missing transaction municipality
+        // from that profile before applying the same municipality boundary.
+        if (!$transactionMunicipalityId && $farmerMunicipalityId) {
+            $transaction->forceFill([
+                'municipality_id' => $farmerMunicipalityId,
+            ])->save();
+            $transactionMunicipalityId = $farmerMunicipalityId;
+        }
+
         abort_unless(
-            $profile->municipality_id === $transaction->municipality_id,
+            (string) $profile->municipality_id === (string) $transactionMunicipalityId,
             403,
             'Transaction is outside your municipality.'
         );
@@ -198,21 +272,12 @@ class LguTransactionVerificationService
         |--------------------------------------------------------------------------
         | FARMER-CREATED TRANSACTION
         |--------------------------------------------------------------------------
-        | Buyer confirmation is mandatory.
+        | Buyer confirmation is optional. The farmer's submitted transaction or
+        | post-auction follow-up is a declaration for LGU Authority review.
+        | The Authority remains responsible for approving or rejecting it.
         */
 
         if ($transaction->source === 'farmer') {
-            if (
-                !$transaction->buyerConfirmations()
-                    ->where('status', 'confirmed')
-                    ->exists()
-            ) {
-                throw ValidationException::withMessages([
-                    'buyer_confirmation' =>
-                        'Buyer confirmation is required.',
-                ]);
-            }
-
             return;
         }
 

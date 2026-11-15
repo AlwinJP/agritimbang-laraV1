@@ -14,6 +14,7 @@ class TransactionItem extends Model
         'transaction_id',
         'livestock_id',
         'valuation_id',
+        'sale_purpose',
         'weight_type',
         'weight_used_kg',
         'base_price_per_kg',

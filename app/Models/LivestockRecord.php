@@ -6,10 +6,16 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class LivestockRecord extends Model
 {
     use HasUuids;
+
+    protected $appends = [
+        'auction_participation_status',
+        'auction_sale_review_pending',
+    ];
 
     protected $fillable = [
         'farmer_id',
@@ -23,6 +29,7 @@ class LivestockRecord extends Model
         'sale_purpose',
         'condition_score',
         'actual_weight_kg',
+        'photo_path',
         'municipality_id',
         'barangay_id',
         'status',
@@ -96,6 +103,14 @@ class LivestockRecord extends Model
     }
 
     /**
+     * Most recent weight estimation for this livestock.
+     */
+    public function latestWeightEstimation(): HasOne
+    {
+        return $this->hasOne(WeightEstimation::class, 'livestock_id')->latestOfMany('created_at');
+    }
+
+    /**
      * Valuation history for this livestock.
      */
     public function valuations(): HasMany
@@ -103,8 +118,60 @@ class LivestockRecord extends Model
         return $this->hasMany(Valuation::class, 'livestock_id');
     }
 
+    /**
+     * Most recent saved valuation for this livestock.
+     */
+    public function latestValuation(): HasOne
+    {
+        return $this->hasOne(Valuation::class, 'livestock_id')->latestOfMany('created_at');
+    }
+
     public function transactionItems(): HasMany
     {
         return $this->hasMany(TransactionItem::class, 'livestock_id');
+    }
+
+    public function auctionRegistrations(): HasMany
+    {
+        return $this->hasMany(AuctionRegistration::class, 'livestock_id');
+    }
+
+    public function activeAuctionRegistration(): HasOne
+    {
+        return $this->hasOne(AuctionRegistration::class, 'active_livestock_id');
+    }
+
+    /** Most recent auction registration, including historical registrations. */
+    public function latestAuctionRegistration(): HasOne
+    {
+        return $this->hasOne(AuctionRegistration::class, 'livestock_id')->latestOfMany('registered_at');
+    }
+
+    /** Current or most recent auction participation state, separate from availability. */
+    public function getAuctionParticipationStatusAttribute(): string
+    {
+        $active = $this->activeAuctionRegistration;
+        if ($active) {
+            return $active->status === 'pending_sale_review' ? 'pending_sale_review' : 'registered';
+        }
+
+        $latest = $this->latestAuctionRegistration;
+        if (!$latest) {
+            return 'not_registered';
+        }
+
+        return match ($latest->status) {
+            'completed' => 'auction_completed',
+            'withdrawn' => 'withdrawn',
+            'cancelled' => 'cancelled',
+            default => 'not_registered',
+        };
+    }
+
+    /** A pending sale involving auction-registered livestock needs review before the auction proceeds. */
+    public function getAuctionSaleReviewPendingAttribute(): bool
+    {
+        return $this->status === 'in_transaction'
+            && $this->activeAuctionRegistration !== null;
     }
 }

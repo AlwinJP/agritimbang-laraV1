@@ -12,7 +12,7 @@
             <div>
                 <p class="verification-eyebrow">LGU TRANSACTION MANAGEMENT</p>
                 <h1>Transaction Verification</h1>
-                <p>Review livestock sales, validate buyer confirmation, and make verification decisions.</p>
+                <p>Review Farmer and Encoder-submitted sales, check sale details, and make verification decisions.</p>
             </div>
             <a href="/transactions/disputes" class="verification-link">Dispute Resolution →</a>
         </div>
@@ -52,9 +52,14 @@
             <div class="verification-filters">
                 <input id="verification-search" type="search" placeholder="Search by transaction ID, farmer, or buyer…"
                     aria-label="Search transactions">
+                <select id="verification-type" aria-label="Filter transaction type">
+                    <option value="">All sale types</option>
+                    <option value="private_sale">Backyard / Private Sale</option>
+                    <option value="auction_sale">Auction Sale</option>
+                </select>
                 <select id="verification-status" aria-label="Filter transaction status">
-                    <option value="">All statuses</option>
-                    <option value="pending_lgu_verification">Pending verification</option>
+                    <option value="review_queue" selected>Pending verification</option>
+                    <option value="all">All statuses</option>
                     <option value="verified">Verified</option>
                     <option value="rejected">Rejected</option>
                 </select>
@@ -67,7 +72,7 @@
                             <th>Transaction</th>
                             <th>Farmer</th>
                             <th>Buyer</th>
-                            <th>Source</th>
+                            <th>Sale Type</th>
                             <th>Amount</th>
                             <th>Status</th>
                             <th>Action</th>

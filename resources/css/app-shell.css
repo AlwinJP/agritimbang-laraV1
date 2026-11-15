@@ -481,7 +481,7 @@ button {
         grid-template-columns: 1fr;
     }
 }
-@media (max-width: 800px) {
+@media (max-width: 1024px) {
     .sidebar {
         transform: translateX(-100%);
         transition: transform 0.2s;

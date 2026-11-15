@@ -1,0 +1,18 @@
+AGRITIMBANG CALCULATOR REPAIR OVERLAY
+
+Purpose
+- Restore the calculator JavaScript and Blade view as a matching pair.
+- Restore the calculator stylesheet and its condition-checklist/modal styles.
+- Restore manual weight and valuation preview controllers, requests, and routes.
+- Restore WeightEstimationService::preview() so manual estimates do not require a saved livestock record.
+- Preserve the existing auction routes in routes/api.php.
+
+Files are incremental overlays. Extract into the Laravel project root and merge/overwrite the listed files.
+
+After extraction:
+  php artisan optimize:clear
+  npm run build
+
+If using the Laravel scheduler for auction lifecycle updates, keep its existing process running separately.
+
+No migration is included. Existing livestock, weight estimations, valuations, auction schedules, registrations, and transactions are not intentionally modified.

@@ -57,7 +57,7 @@ class TransactionApiTest extends TestCase
             ->assertJsonValidationErrors(['items']);
     }
 
-    public function test_authenticated_farmer_cannot_submit_missing_buyer_name(): void
+    public function test_buyer_name_is_optional_when_creating_transaction(): void
     {
         $farmer = $this->createFarmer();
 
@@ -67,7 +67,7 @@ class TransactionApiTest extends TestCase
                 'items' => [],
             ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['buyer_name']);
+            ->assertJsonMissingValidationErrors(['buyer_name']);
     }
 
     public function test_authenticated_farmer_cannot_submit_invalid_transaction_date(): void

@@ -18,6 +18,10 @@ class Transaction extends Model
         'municipality_id',
         'barangay_id',
         'transaction_date',
+        'selling_location',
+        'selling_barangay_id',
+        'transaction_type',
+        'auction_schedule_id',
         'status',
         'total_reference_value',
         'total_selling_price',
@@ -85,6 +89,16 @@ class Transaction extends Model
     public function auctionHouse(): BelongsTo
     {
         return $this->belongsTo(AuctionHouse::class);
+    }
+
+    public function sellingBarangay(): BelongsTo
+    {
+        return $this->belongsTo(Barangay::class, 'selling_barangay_id');
+    }
+
+    public function auctionSchedule(): BelongsTo
+    {
+        return $this->belongsTo(AuctionSchedule::class, 'auction_schedule_id');
     }
 
     public function disputes(): HasMany

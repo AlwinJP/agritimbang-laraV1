@@ -4,10 +4,13 @@ namespace App\Services;
 
 use App\Jobs\SendBuyerConfirmationSms;
 use App\Models\FarmerProfile;
+use App\Models\Barangay;
+use App\Models\AuctionRegistration;
 use App\Models\LivestockRecord;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\Valuation;
+use App\Notifications\SystemAlertNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -195,6 +198,18 @@ class TransactionService
                 $livestock->update([
                     'status' => 'in_transaction',
                 ]);
+
+                if ($transaction->auction_schedule_id) {
+                    AuctionRegistration::query()
+                        ->where('auction_schedule_id', $transaction->auction_schedule_id)
+                        ->where('livestock_id', $livestock->id)
+                        ->where('farmer_id', $farmer->id)
+                        ->first()
+                        ?->update([
+                            'status' => 'pending_sale_review',
+                            'active_livestock_id' => $livestock->id,
+                        ]);
+                }
             }
 
             // Skip buyer confirmation.
@@ -255,6 +270,10 @@ class TransactionService
                 'municipality_id' => $farmer->municipality_id,
                 'barangay_id' => $farmer->barangay_id,
                 'transaction_date' => $data['transaction_date'] ?? now(),
+                'selling_location' => $this->resolveSellingLocation($data),
+                'selling_barangay_id' => $data['selling_barangay_id'] ?? null,
+                'transaction_type' => $data['transaction_type'] ?? 'private',
+                'auction_schedule_id' => $data['auction_schedule_id'] ?? null,
                 'status' => 'draft',
 
                 'source' => $actorType === 'lgu_encoder'
@@ -294,54 +313,32 @@ class TransactionService
                     $index
                 );
 
-                $valuation = $this->getValidValuation(
-                    $livestock,
-                    $item['valuation_id'],
-                    $index
-                );
-
-                $sellingPrice = $this->validateSellingPrice(
-                    $item['actual_selling_price'],
-                    $index
-                );
-
-                $referenceValue = (float) $valuation->estimated_value;
-                $weight = (float) $valuation->weight_used_kg;
-
-                $difference = round(
-                    $sellingPrice - $referenceValue,
-                    2
-                );
-
-                $deviation = round(
-                    ($difference / $referenceValue) * 100,
-                    4
-                );
-
-                $pricePerKg = round(
-                    $sellingPrice / $weight,
-                    2
-                );
+                $valuation = $this->optionalValuation($livestock, $item['valuation_id'] ?? null);
+                $sellingPrice = $this->validateSellingPrice($item['actual_selling_price'], $index);
+                $purpose = $item['sale_purpose'] ?? (in_array($livestock->sale_purpose, ['slaughter', 'breeding'], true) ? $livestock->sale_purpose : 'slaughter');
+                $referenceValue = $valuation ? (float) $valuation->estimated_value : 0.0;
+                $weight = $valuation ? (float) $valuation->weight_used_kg : (float) ($livestock->actual_weight_kg ?? 0);
+                $difference = $valuation ? round($sellingPrice - $referenceValue, 2) : null;
+                $deviation = ($valuation && $referenceValue > 0) ? round(($difference / $referenceValue) * 100, 4) : null;
+                $pricePerKg = $weight > 0 ? round($sellingPrice / $weight, 2) : null;
 
                 $transaction->items()->create([
                     'livestock_id' => $livestock->id,
-                    'valuation_id' => $valuation->id,
-                    'weight_type' => $valuation->weight_type,
-                    'weight_used_kg' => $valuation->weight_used_kg,
-                    'base_price_per_kg' =>
-                        $valuation->base_price_per_kg,
-                    'final_price_per_kg' =>
-                        $valuation->final_price_per_kg,
+                    'valuation_id' => $valuation?->id,
+                    'sale_purpose' => $purpose,
+                    'weight_type' => $valuation?->weight_type ?? 'actual',
+                    'weight_used_kg' => $weight,
+                    'base_price_per_kg' => $valuation?->base_price_per_kg ?? 0,
+                    'final_price_per_kg' => $valuation?->final_price_per_kg ?? 0,
                     'reference_value' => $referenceValue,
                     'actual_selling_price' => $sellingPrice,
                     'actual_selling_price_per_kg' => $pricePerKg,
                     'price_difference' => $difference,
                     'percentage_deviation' => $deviation,
-                    'valuation_snapshot' =>
-                        $this->valuationSnapshot($valuation),
-                    'calculation_version' =>
-                        $valuation->calculation_version,
+                    'valuation_snapshot' => $valuation ? $this->valuationSnapshot($valuation) : ['note' => 'No saved valuation was available at the time of sale recording.'],
+                    'calculation_version' => $valuation?->calculation_version ?? 'sale-recording-no-valuation-v1',
                 ]);
+                $livestock->update(['sale_purpose' => $purpose]);
 
                 $totalReference += $referenceValue;
                 $totalSelling += $sellingPrice;
@@ -369,6 +366,14 @@ class TransactionService
                 : 'Draft transaction created.'
             );
 
+            $this->notifyTransactionEvent(
+                $transaction,
+                $farmer,
+                'transaction.draft_created',
+                'Bag-ong transaction record',
+                'A transaction draft has been saved. You can review and continue editing it before submission.'
+            );
+
             return $transaction->load([
                 'items.livestock',
                 'items.valuation',
@@ -383,6 +388,81 @@ class TransactionService
     | SHARED TRANSACTION SUBMISSION
     |--------------------------------------------------------------------------
     */
+
+
+    public function updateFarmerDraft(User $user, string $transactionId, array $data): Transaction
+    {
+        $farmer = $this->verifiedFarmer($user);
+        $this->validateItems($data);
+
+        return DB::transaction(function () use ($farmer, $transactionId, $data) {
+            $transaction = Transaction::query()
+                ->whereKey($transactionId)
+                ->where('farmer_id', $farmer->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($transaction->status !== 'draft' || $transaction->source !== 'farmer') {
+                throw ValidationException::withMessages([
+                    'status' => 'Only your own saved farmer drafts can be edited.',
+                ]);
+            }
+
+            $transaction->update([
+                'buyer_name' => $data['buyer_name'],
+                'buyer_phone' => $data['buyer_phone'] ?? null,
+                'transaction_date' => $data['transaction_date'] ?? $transaction->transaction_date,
+                'selling_location' => $this->resolveSellingLocation($data),
+                'selling_barangay_id' => $data['selling_barangay_id'] ?? $transaction->selling_barangay_id,
+                'remarks' => $data['remarks'] ?? null,
+            ]);
+            $transaction->items()->delete();
+
+            $totalReference = 0;
+            $totalSelling = 0;
+            foreach (collect($data['items'])->values() as $index => $item) {
+                $livestock = $this->lockEligibleLivestock($farmer, $item['livestock_id'], $index);
+                $valuation = $this->optionalValuation($livestock, $item['valuation_id'] ?? null);
+                $sellingPrice = $this->validateSellingPrice($item['actual_selling_price'], $index);
+                $purpose = $item['sale_purpose'] ?? (in_array($livestock->sale_purpose, ['slaughter', 'breeding'], true) ? $livestock->sale_purpose : 'slaughter');
+                $referenceValue = $valuation ? (float) $valuation->estimated_value : 0.0;
+                $weight = $valuation ? (float) $valuation->weight_used_kg : (float) ($livestock->actual_weight_kg ?? 0);
+                $difference = $valuation ? round($sellingPrice - $referenceValue, 2) : null;
+                $deviation = ($valuation && $referenceValue > 0) ? round(($difference / $referenceValue) * 100, 4) : null;
+                $transaction->items()->create([
+                    'livestock_id' => $livestock->id,
+                    'valuation_id' => $valuation?->id,
+                    'sale_purpose' => $purpose,
+                    'weight_type' => $valuation?->weight_type ?? 'actual',
+                    'weight_used_kg' => $weight,
+                    'base_price_per_kg' => $valuation?->base_price_per_kg ?? 0,
+                    'final_price_per_kg' => $valuation?->final_price_per_kg ?? 0,
+                    'reference_value' => $referenceValue,
+                    'actual_selling_price' => $sellingPrice,
+                    'actual_selling_price_per_kg' => $weight > 0 ? round($sellingPrice / $weight, 2) : null,
+                    'price_difference' => $difference,
+                    'percentage_deviation' => $deviation,
+                    'valuation_snapshot' => $valuation ? $this->valuationSnapshot($valuation) : ['note' => 'No saved valuation was available at the time of sale recording.'],
+                    'calculation_version' => $valuation?->calculation_version ?? 'sale-recording-no-valuation-v1',
+                ]);
+                $livestock->update(['sale_purpose' => $purpose]);
+                $totalReference += $referenceValue;
+                $totalSelling += $sellingPrice;
+            }
+
+            $transaction->update([
+                'total_reference_value' => round($totalReference, 2),
+                'total_selling_price' => round($totalSelling, 2),
+            ]);
+
+            return $transaction->fresh([
+                'items.livestock.species',
+                'items.valuation',
+                'farmer',
+                'statusLogs',
+            ]);
+        }, 3);
+    }
 
     private function submitTransactionDraft(
         User $actor,
@@ -424,13 +504,6 @@ class TransactionService
             if ($transaction->status !== 'draft') {
                 throw ValidationException::withMessages([
                     'status' => 'Only draft transactions can be submitted.',
-                ]);
-            }
-
-            if (!$transaction->buyer_phone) {
-                throw ValidationException::withMessages([
-                    'buyer_phone' =>
-                        'Buyer phone number is required for confirmation.',
                 ]);
             }
 
@@ -493,29 +566,51 @@ class TransactionService
                 $livestock->update([
                     'status' => 'in_transaction',
                 ]);
+
+                // Keep auction participation synchronized with the transaction.
+                // A post-auction farmer response is linked to its specific event;
+                // a private sale reserves any currently active auction registration.
+                $registrationQuery = AuctionRegistration::query()
+                    ->where('livestock_id', $livestock->id)
+                    ->where('farmer_id', $farmer->id)
+                    ->lockForUpdate();
+
+                if ($transaction->auction_schedule_id) {
+                    $registrationQuery->where('auction_schedule_id', $transaction->auction_schedule_id);
+                } else {
+                    $registrationQuery->where('active_livestock_id', $livestock->id)
+                        ->where('status', 'registered');
+                }
+
+                $registrationQuery->get()->each(function (AuctionRegistration $registration) use ($livestock) {
+                    $registration->update([
+                        'status' => 'pending_sale_review',
+                        'active_livestock_id' => $livestock->id,
+                        'remarks' => trim(($registration->remarks ? $registration->remarks . "\n" : '') . 'Livestock is reserved by a farmer-reported transaction awaiting LGU Authority verification.'),
+                    ]);
+                });
             }
 
             $transaction->update([
-                'status' => 'pending',
+                'status' => 'pending_lgu_verification',
             ]);
 
             $this->recordStatus(
                 $transaction,
                 'draft',
-                'pending',
+                'pending_lgu_verification',
                 $actor,
                 $actorType,
-                'Submitted for buyer confirmation.'
+                'Submitted directly for LGU Authority verification.'
             );
 
-            $issued = $confirmationService->issue(
-                $transaction
+            $this->notifyTransactionEvent(
+                $transaction,
+                $farmer,
+                'transaction.submitted',
+                'Na-submit na ang transaction',
+                'Your sale has been submitted to the Municipal Agriculture Office for verification.'
             );
-
-            SendBuyerConfirmationSms::dispatch(
-                $transaction->id,
-                $issued['token']
-            )->afterCommit();
 
             return $transaction->fresh([
                 'items',
@@ -530,6 +625,26 @@ class TransactionService
     | FARMER & ENCODER AUTHORIZATION
     |--------------------------------------------------------------------------
     */
+
+    private function notifyTransactionEvent(Transaction $transaction, FarmerProfile $farmer, string $event, string $title, string $message): void
+    {
+        $farmer->user?->notify(new SystemAlertNotification(
+            $event, $title, $message, (string) $transaction->municipality_id,
+            'transaction', (string) $transaction->id
+        ));
+
+        $officers = User::query()
+            ->where('status', 'active')
+            ->whereHas('roles', fn ($q) => $q->whereIn('slug', ['lgu_encoder', 'lgu_authority']))
+            ->whereHas('lguOfficerProfile', fn ($q) => $q->where('municipality_id', $transaction->municipality_id))
+            ->get();
+        foreach ($officers as $officer) {
+            $officer->notify(new SystemAlertNotification(
+                $event, $title, 'A farmer transaction has been recorded. Review it in the transaction workspace.',
+                (string) $transaction->municipality_id, 'transaction', (string) $transaction->id
+            ));
+        }
+    }
 
     private function verifiedFarmer(User $user): FarmerProfile
     {
@@ -554,7 +669,10 @@ class TransactionService
     {
         abort_unless(
             $user->roles()
-                ->where('slug', 'lgu_encoder')
+                ->where(function ($query) {
+                    $query->whereIn('slug', ['lgu_encoder', 'lgu-encoder', 'encoder'])
+                        ->orWhereRaw('LOWER(name) = ?', ['lgu encoder']);
+                })
                 ->exists(),
             403,
             'Only LGU Encoders may encode transactions.'
@@ -710,6 +828,21 @@ class TransactionService
     |--------------------------------------------------------------------------
     */
 
+    private function optionalValuation(LivestockRecord $livestock, ?string $valuationId): ?Valuation
+    {
+        if ($valuationId) {
+            return $this->getValidValuation($livestock, $valuationId, 0);
+        }
+
+        return Valuation::query()
+            ->where('livestock_id', $livestock->id)
+            ->whereNotNull('estimated_value')
+            ->where('estimated_value', '>', 0)
+            ->where('weight_used_kg', '>', 0)
+            ->latest('created_at')
+            ->first();
+    }
+
     private function getValidValuation(
         LivestockRecord $livestock,
         string $valuationId,
@@ -812,4 +945,15 @@ class TransactionService
             'remarks' => $remarks,
         ]);
     }
+    private function resolveSellingLocation(array $data): ?string
+    {
+        $typedLocation = trim((string) ($data['selling_location'] ?? ''));
+        if ($typedLocation !== '') return $typedLocation;
+
+        $barangayId = $data['selling_barangay_id'] ?? null;
+        if (!$barangayId) return null;
+
+        return Barangay::query()->whereKey($barangayId)->value('name');
+    }
+
 }

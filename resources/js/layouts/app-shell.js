@@ -31,15 +31,17 @@ const NAV = {
     farmer: [
         { label: "Overview", icon: "layout-dashboard", href: "/dashboard" },
         { label: "My Livestock", icon: "beef", href: "/livestock" },
+        { label: "Auctions", icon: "calendar-days", href: "/auctions" },
+        { label: "Auction Follow-ups", icon: "clipboard-check", href: "/auction-follow-ups" },
         { label: "Official Prices", icon: "philippine-peso", href: "/prices" },
         {
             label: "Transactions",
             icon: "arrow-left-right",
-            href: "/transactions/create",
+            href: "/transactions",
         },
         { label: "Calculators", icon: "calculator", href: "/calculator" },
 
-        { label: "Profile Settings", icon: "settings", href: "/profile" },
+        { label: "Profile", icon: "settings", href: "/profile" },
     ],
 
     lgu_authority: [
@@ -57,6 +59,7 @@ const NAV = {
             icon: "warehouse",
             href: "/lgu/auction-houses",
         },
+        { label: "Farmer Follow-ups", icon: "clipboard-check", href: "/lgu/auction-follow-ups" },
 
         { label: "Price Management", icon: "philippine-peso", href: "/prices" },
         {
@@ -105,12 +108,14 @@ const NAV = {
             ],
         },
 
-        { label: "Profile Settings", icon: "settings", href: "/profile" },
+        { label: "Profile", icon: "settings", href: "/profile" },
     ],
 
     lgu_encoder: [
         { label: "Overview", icon: "layout-dashboard", href: "/dashboard" },
         { label: "Livestock Management", icon: "beef", href: "/livestock" },
+        { label: "Auction Schedules", icon: "calendar-days", href: "/lgu/auction-schedules" },
+        { label: "Farmer Follow-ups", icon: "clipboard-check", href: "/lgu/auction-follow-ups" },
         { label: "Draft Weekly Price", icon: "file-pen-line", href: "/prices" },
         { label: "Calculators", icon: "calculator", href: "/calculator" },
 
@@ -137,9 +142,10 @@ const NAV = {
             icon: "arrow-left-right",
             children: [
                 { label: "Assist Transaction", href: "/transactions/assist" },
+                { label: "Transaction History", href: "/transactions/history" },
             ],
         },
-        { label: "Profile Settings", icon: "settings", href: "/profile" },
+        { label: "Profile", icon: "settings", href: "/profile" },
     ],
 
     admin: [
@@ -180,7 +186,7 @@ const NAV = {
                 // { label: "System Settings", href: "/settings" },
             ],
         },
-        { label: "Profile Settings", icon: "settings", href: "/profile" },
+        { label: "Profile", icon: "settings", href: "/profile" },
     ],
 };
 
@@ -197,10 +203,15 @@ const IMPLEMENTED_ROUTES = new Set([
     "/analytics/forecast",
     "/farmers",
     "/livestock",
+    "/auctions",
+    "/auction-follow-ups",
+    "/lgu/auction-follow-ups",
+    "/lgu/auction-schedules",
     "/users",
     "/lgu/encoders",
     "/calculator",
     "/prices",
+    "/transactions",
     "/transactions/create",
     "/transactions/review",
     "/transactions/disputes",
@@ -212,6 +223,7 @@ const IMPLEMENTED_ROUTES = new Set([
     "/lgu/farmer-verifications",
     "/profile",
     "/transactions/assist",
+    "/transactions/history",
     "/reports",
 ]);
 
@@ -365,7 +377,27 @@ function renderNavigation(role) {
     const nav = elements.navigation;
     if (!nav) return;
 
-    const items = NAV[role] || NAV.farmer;
+    const configuredItems = NAV[role] || NAV.farmer;
+    // Admin may still open transaction history through an authorized direct URL,
+    // but it must not be exposed as a sidebar navigation item.
+    const items = role === "admin"
+        ? configuredItems
+              .map((item) =>
+                  item.children
+                      ? {
+                            ...item,
+                            children: item.children.filter(
+                                (child) => child.href !== "/transactions/history",
+                            ),
+                        }
+                      : item,
+              )
+              .filter(
+                  (item) =>
+                      item.href !== "/transactions/history" &&
+                      (!item.children || item.children.length > 0),
+              )
+        : configuredItems;
     const currentPath = getCurrentPath();
 
     const isActive = (href) =>

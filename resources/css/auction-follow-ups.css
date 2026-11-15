@@ -1,0 +1,429 @@
+.followup-page {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0 auto;
+    color: var(--text, #24301f);
+    box-sizing: border-box;
+    overflow-x: clip;
+}
+
+.followup-header,
+.followup-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.followup-header {
+    margin-bottom: 22px;
+}
+
+.followup-eyebrow {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    color: #73816b;
+}
+
+.followup-header h1 {
+    margin: 5px 0;
+    font-size: clamp(25px, 3vw, 34px);
+}
+
+.followup-header p,
+.followup-toolbar p {
+    margin: 0;
+    color: #74806f;
+}
+
+.followup-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.followup-stats article,
+.followup-panel {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e3e8df);
+    border-radius: 16px;
+    padding: 18px;
+}
+
+.followup-stats strong {
+    display: block;
+    font-size: 27px;
+}
+
+.followup-stats span {
+    font-size: 13px;
+    color: #74806f;
+}
+
+.followup-toolbar {
+    margin-bottom: 16px;
+}
+
+.followup-toolbar h2 {
+    margin: 0 0 4px;
+    font-size: 19px;
+}
+
+.followup-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.followup-filters select,
+.followup-field input,
+.followup-field select,
+.followup-field textarea {
+    width: 100%;
+    border: 1px solid #d9e0d4;
+    border-radius: 9px;
+    padding: 10px 12px;
+    background: #fff;
+    color: #263323;
+}
+
+.followup-filters select {
+    width: auto;
+    min-width: 160px;
+}
+
+.followup-list {
+    display: grid;
+    gap: 10px;
+}
+
+.followup-card {
+    border: 1px solid #e3e8df;
+    border-radius: 13px;
+    padding: 15px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.followup-card h3 {
+    margin: 0 0 5px;
+    font-size: 16px;
+}
+
+.followup-card p {
+    margin: 3px 0;
+    color: #74806f;
+    font-size: 13px;
+}
+
+.followup-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.followup-status {
+    display: inline-flex;
+    border-radius: 99px;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #f0f2ed;
+    color: #55614f;
+}
+
+.followup-status.pending {
+    background: #fff5df;
+    color: #92651a;
+}
+
+.followup-status.overdue,
+.followup-status.unresponsive {
+    background: #fff0ed;
+    color: #a23e30;
+}
+
+.followup-status.responded {
+    background: #eaf5e8;
+    color: #3e7137;
+}
+
+.followup-button {
+    border: 0;
+    border-radius: 9px;
+    background: #426b32;
+    color: white;
+    padding: 10px 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.followup-button.is-light {
+    background: #f0f3ed;
+    color: #34442e;
+    border: 1px solid #dfe5da;
+}
+
+.followup-button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.followup-alert {
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #edf5e9;
+    margin-bottom: 14px;
+}
+
+.followup-alert.is-error {
+    background: #fff0ed;
+    color: #943d31;
+}
+
+.followup-muted {
+    color: #74806f;
+}
+
+.followup-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    color: #74806f;
+    font-size: 13px;
+}
+
+.followup-pagination > div {
+    display: flex;
+    gap: 8px;
+}
+
+.followup-dialog {
+    border: 0;
+    border-radius: 17px;
+    padding: 0;
+    width: min(620px, calc(100% - 28px));
+    box-shadow: 0 22px 80px #0003;
+}
+
+.followup-dialog::backdrop {
+    background: #18221488;
+}
+
+.followup-dialog form {
+    padding: 22px;
+}
+
+.followup-dialog-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.followup-dialog-head h2 {
+    margin: 4px 0 12px;
+}
+
+.followup-dialog-head > button {
+    border: 0;
+    background: #f0f3ed;
+    border-radius: 50%;
+    width: 34px;
+    height: 34px;
+    font-size: 22px;
+    cursor: pointer;
+}
+
+.followup-field {
+    display: grid;
+    gap: 6px;
+    margin: 12px 0;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.followup-field textarea {
+    resize: vertical;
+}
+
+.followup-two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.followup-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 9px;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #e5e9e1;
+}
+
+@media (max-width: 680px) {
+    .followup-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .followup-card {
+        grid-template-columns: 1fr;
+    }
+
+    .followup-card-actions {
+        justify-content: flex-start;
+    }
+
+    .followup-two {
+        grid-template-columns: 1fr;
+    }
+
+    .followup-filters {
+        width: 100%;
+    }
+
+    .followup-filters select {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+/* Keep follow-up content inside the available main column beside the fixed sidebar. */
+
+.followup-page *,
+.followup-page *::before,
+.followup-page *::after {
+    box-sizing: border-box;
+}
+
+.followup-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.followup-toolbar > div,
+.followup-card > div {
+    min-width: 0;
+}
+
+.followup-card {
+    min-width: 0;
+}
+
+@media (max-width: 900px) {
+    .followup-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .followup-toolbar {
+        align-items: stretch;
+    }
+
+    .followup-filters {
+        width: 100%;
+    }
+
+    .followup-filters select {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 540px) {
+    .followup-header {
+        align-items: flex-start;
+    }
+
+    .followup-stats {
+        gap: 8px;
+    }
+
+    .followup-stats article,
+    .followup-panel {
+        padding: 13px;
+    }
+
+    .followup-toolbar {
+        gap: 12px;
+    }
+
+    .followup-filters {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .followup-filters select {
+        width: 100%;
+    }
+}
+
+/* Follow-up page alignment fix: keep every section inside the main column. */
+
+#page-content {
+    min-width: 0;
+}
+
+#page-content > #auction-followups-page.followup-page {
+    position: relative;
+    inset-inline: auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    transform: none;
+}
+
+#auction-followups-page .followup-header,
+#auction-followups-page .followup-stats,
+#auction-followups-page .followup-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-inline: 0;
+}
+
+#auction-followups-page .followup-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+#auction-followups-page .followup-stats > article {
+    min-width: 0;
+    width: auto;
+    overflow-wrap: anywhere;
+}
+
+#auction-followups-page .followup-toolbar,
+#auction-followups-page .followup-list,
+#auction-followups-page .followup-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#auction-followups-page .followup-toolbar > div,
+#auction-followups-page .followup-card > div {
+    min-width: 0;
+}
+
+@media (max-width: 1100px) {
+    #auction-followups-page .followup-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 420px) {
+    #auction-followups-page .followup-stats {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

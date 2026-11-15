@@ -1,574 +1,239 @@
 import api from "../api";
-
-console.log("[AgriTimbang] Transaction module loaded");
+import { formatDate as sharedFormatDate } from "../utils/date-format";
 
 function initializeTransactionPage() {
     const root = document.getElementById("sale-page");
-
-    if (!root) {
-        console.warn("[Transactions] #sale-page not found");
-        return;
-    }
+    if (!root || root.dataset.initialized) return;
+    root.dataset.initialized = "1";
 
     const $ = (id) => document.getElementById(id);
+    const form = $("sale-form"), itemsContainer = $("sale-items"), alertBox = $("sale-alert");
+    const saveButton = $("save-draft"), submitButton = $("submit-sale"), addButton = $("add-item");
+    const nextButton = $("sale-next-step"), backButton = $("sale-back-step");
+    const totalElement = $("sale-total"), reviewElement = $("sale-review");
+    const money = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
+    const state = { livestock: [], barangays: [], rows: new Map(), draftId: null, step: 1, busy: false, submitted: false, uncertain: false, nextRowId: 0 };
 
-    const form = $("sale-form");
-    const itemsContainer = $("sale-items");
-    const alertBox = $("sale-alert");
-    const saveButton = $("save-draft");
-    const submitButton = $("submit-sale");
-    const addButton = $("add-item");
-    const totalElement = $("sale-total");
-
-    if (
-        !form ||
-        !itemsContainer ||
-        !alertBox ||
-        !saveButton ||
-        !submitButton ||
-        !addButton ||
-        !totalElement
-    ) {
-        console.error("[Transactions] Missing required form elements");
-        return;
-    }
-
-    const money = new Intl.NumberFormat("en-PH", {
-        style: "currency",
-        currency: "PHP",
-    });
-
-    const state = {
-        livestock: [],
-        rows: new Map(),
-        draftId: null,
-        busy: false,
-        submitted: false,
-        uncertain: false,
-        nextRowId: 0,
+    const unwrap = (r) => r.data?.data ?? r.data;
+    const collection = (p) => Array.isArray(p) ? p : (Array.isArray(p?.data) ? p.data : []);
+    const errorMessage = (e) => {
+        const errors = e?.response?.data?.errors;
+        return errors ? Object.values(errors).flat().join(" ") : (e?.response?.data?.message || e?.message || "Something went wrong.");
     };
-
-    // --------------------------------------------------
-    // API helpers
-    // --------------------------------------------------
-
-    function unwrap(response) {
-        return response.data?.data ?? response.data;
-    }
-
-    function collection(payload) {
-        if (Array.isArray(payload)) return payload;
-        if (Array.isArray(payload?.data)) return payload.data;
-        return [];
-    }
-
-    function getErrorMessage(error) {
-        const data = error?.response?.data;
-
-        if (data?.errors) {
-            const messages = Object.values(data.errors).flat();
-            if (messages.length) return messages.join(" ");
-        }
-
-        return data?.message || error?.message || "Something went wrong.";
-    }
-
-    // --------------------------------------------------
-    // UI helpers
-    // --------------------------------------------------
-
-    function showAlert(message, type = "error") {
-        alertBox.textContent = message;
-        alertBox.className = `sale-alert ${type}`;
-        alertBox.hidden = false;
-    }
-
-    function clearAlert() {
-        alertBox.hidden = true;
-        alertBox.textContent = "";
-    }
-
-    function setBusy(value) {
-        state.busy = value;
-
-        saveButton.disabled =
-            value || Boolean(state.draftId) || state.uncertain;
-
-        submitButton.disabled = value || state.submitted || state.uncertain;
-
-        addButton.disabled = value || Boolean(state.draftId) || state.uncertain;
-
-        for (const row of state.rows.values()) {
-            row.remove.disabled =
-                value || Boolean(state.draftId) || state.uncertain;
-        }
-    }
-
-    function lockForm() {
-        form.querySelectorAll("input, select, textarea").forEach((el) => {
-            el.disabled = true;
-        });
-
-        for (const row of state.rows.values()) {
-            row.remove.disabled = true;
-        }
-
-        addButton.disabled = true;
-        saveButton.disabled = true;
-        saveButton.textContent = "Draft Saved";
-    }
+    function alert(message, type = "error") { alertBox.textContent = message; alertBox.className = `sale-alert ${type}`; alertBox.hidden = false; }
+    function clearAlert() { alertBox.hidden = true; alertBox.textContent = ""; }
+    function setBusy(busy) { state.busy = busy; [saveButton, submitButton, nextButton, backButton, addButton].forEach((b) => { if (b) b.disabled = busy || state.uncertain || state.submitted; }); }
 
     function updateTotal() {
-        const total = [...state.rows.values()].reduce((sum, row) => {
-            const price = Number(row.price.value);
-
-            return sum + (Number.isFinite(price) && price > 0 ? price : 0);
-        }, 0);
-
+        const total = [...state.rows.values()].reduce((sum, row) => sum + Math.max(0, Number(row.price.value) || 0), 0);
         totalElement.textContent = money.format(total);
     }
-
-    // --------------------------------------------------
-    // Livestock
-    // --------------------------------------------------
-
-    function selectedLivestockIds(exceptId = null) {
-        return new Set(
-            [...state.rows.entries()]
-                .filter(([id]) => id !== exceptId)
-                .map(([, row]) => row.livestock.value)
-                .filter(Boolean),
-        );
-    }
-
-    function refreshLivestockOptions() {
-        for (const [id, row] of state.rows.entries()) {
-            const previous = row.livestock.value;
-            const used = selectedLivestockIds(id);
-
-            row.livestock.replaceChildren(new Option("Select livestock", ""));
-
-            for (const animal of state.livestock) {
-                if (used.has(String(animal.id))) continue;
-
-                const species =
-                    animal.species?.name || animal.species_name || "Livestock";
-
+    function usedIds(except = null) { return new Set([...state.rows.entries()].filter(([id]) => id !== except).map(([, row]) => row.livestock.value).filter(Boolean)); }
+    function refreshOptions() {
+        for (const [id, row] of state.rows) {
+            const previous = row.livestock.value, used = usedIds(id);
+            row.livestock.replaceChildren(new Option("Choose livestock", ""));
+            state.livestock.forEach((animal) => {
+                if (used.has(String(animal.id))) return;
+                const species = animal.species?.name || animal.species_name || "Livestock";
                 const breed = animal.breed?.name || animal.breed_name || "";
-
-                const label = [species, breed, String(animal.id).slice(0, 8)]
-                    .filter(Boolean)
-                    .join(" — ");
-
-                row.livestock.add(new Option(label, String(animal.id)));
-            }
-
-            if (
-                [...row.livestock.options].some(
-                    (option) => option.value === previous,
-                )
-            ) {
-                row.livestock.value = previous;
-            }
-        }
-    }
-
-    async function loadLivestock() {
-        console.log("[Transactions] Requesting farmer livestock...");
-
-        try {
-            const response = await api.get("/farmer/livestock", {
-                params: {
-                    status: "available",
-                },
+                const suffix = animal.tag_number || String(animal.id).slice(0, 8);
+                const auctionLabel = animal.auction_participation_status === "registered" ? "Auction registered" : "";
+                row.livestock.add(new Option([species, breed, suffix, auctionLabel].filter(Boolean).join(" · "), String(animal.id)));
             });
-
-            console.log("[Transactions] Livestock response:", response.data);
-
-            state.livestock = collection(unwrap(response));
-
-            refreshLivestockOptions();
-
-            if (state.livestock.length === 0) {
-                showAlert(
-                    "No available livestock found. Please register an available livestock record first.",
-                );
-            }
-
-            console.log(
-                `[Transactions] Loaded ${state.livestock.length} livestock records`,
-            );
-        } catch (error) {
-            console.error("[Transactions] Livestock request failed:", error);
-
-            showAlert(`Unable to load livestock: ${getErrorMessage(error)}`);
+            if ([...row.livestock.options].some((o) => o.value === previous)) row.livestock.value = previous;
+        }
+        updateAuctionWarning();
+    }
+    function addRow(prefill = null) {
+        if (state.rows.size >= 50) return;
+        const id = ++state.nextRowId;
+        const element = document.createElement("article");
+        element.className = "sale-item";
+        element.innerHTML = `
+            <div class="sale-item-header"><strong>Livestock <span class="sale-item-number"></span></strong><button type="button" class="sale-remove" aria-label="Remove livestock">Remove</button></div>
+            <div class="sale-grid">
+                <label class="sale-span-2">Which animal did you sell?<select class="sale-livestock" required><option value="">Choose livestock</option></select></label>
+                <label>How much did you receive? (₱)<input class="sale-price" type="number" min="0.01" max="999999999999.99" step="0.01" placeholder="e.g. 25000" required></label>
+                <label>What was it sold for?<select class="sale-purpose" required><option value="slaughter">Slaughter</option><option value="breeding">Breeding</option></select></label>
+            </div>`;
+        const row = { element, livestock: element.querySelector(".sale-livestock"), price: element.querySelector(".sale-price"), purpose: element.querySelector(".sale-purpose"), remove: element.querySelector(".sale-remove") };
+        state.rows.set(id, row); itemsContainer.appendChild(element);
+        row.livestock.addEventListener("change", refreshOptions);
+        row.price.addEventListener("input", updateTotal);
+        row.remove.addEventListener("click", () => { if (state.rows.size <= 1) { alert("Keep at least one livestock item in your sale."); return; } state.rows.delete(id); element.remove(); renumber(); refreshOptions(); updateTotal(); });
+        const preselectedLivestockId = prefill?.livestock_id ? String(prefill.livestock_id) : "";
+        if (prefill) { row.price.value = prefill.actual_selling_price || ""; row.purpose.value = prefill.sale_purpose || "slaughter"; }
+        refreshOptions();
+        // Set the selected ID only after its option has been added to the select.
+        if (preselectedLivestockId && [...row.livestock.options].some((option) => option.value === preselectedLivestockId)) {
+            row.livestock.value = preselectedLivestockId;
+        }
+        renumber(); updateTotal(); updateAuctionWarning();
+    }
+    function renumber() { [...state.rows.values()].forEach((r, i) => { r.element.querySelector(".sale-item-number").textContent = `#${i + 1}`; }); }
+    async function loadBarangays() {
+        const profileResponse = await api.get('/farmer/profile');
+        const profile = unwrap(profileResponse);
+        const municipalityId = profile?.municipality_id;
+        const homeBarangayId = profile?.barangay_id;
+        if (!municipalityId) throw new Error('Your municipality could not be identified. Please update your farmer profile first.');
+        const response = await api.get('/gis/barangays', { params: { municipality_id: municipalityId } });
+        state.barangays = collection(unwrap(response));
+        const select = form.elements.selling_barangay_id;
+        select.replaceChildren(new Option('Choose barangay', ''));
+        state.barangays.forEach((barangay) => select.add(new Option(barangay.name, String(barangay.id))));
+        if (homeBarangayId && state.barangays.some((b) => String(b.id) === String(homeBarangayId))) select.value = String(homeBarangayId);
+    }
+    async function loadLivestock() {
+        const response = await api.get("/farmer/livestock", { params: { status: "available" } });
+        state.livestock = collection(unwrap(response)).filter((a) => String(a.status || "").toLowerCase() === "available");
+        refreshOptions();
+        if (!state.livestock.length) alert("You don't have available registered livestock yet. Please register your livestock first.");
+    }
+    function selectedAuctionRegisteredAnimals() {
+        return [...state.rows.values()]
+            .map((row) => state.livestock.find((animal) => String(animal.id) === String(row.livestock.value)))
+            .filter((animal) => animal?.auction_participation_status === "registered");
+    }
+    function updateAuctionWarning() {
+        const warning = $("sale-auction-warning");
+        const animals = selectedAuctionRegisteredAnimals();
+        if (!warning) return;
+        warning.hidden = animals.length === 0;
+        if (animals.length) {
+            warning.innerHTML = `<strong>Some selected livestock are registered in an auction.</strong> You can still record this private sale. Once you submit it, the livestock will be removed from the auction list while the LGU Authority reviews the transaction.`;
         }
     }
 
-    // --------------------------------------------------
-    // Valuations
-    // --------------------------------------------------
+    function validateStep(step) {
+        clearAlert();
+        if (step === 1) {
+            if (!state.rows.size) { alert("Please add at least one livestock."); return false; }
+            for (const row of state.rows.values()) {
+                if (!row.livestock.value || !row.price.value || Number(row.price.value) <= 0 || !row.purpose.value) { alert("Please select each livestock, enter its selling price, and choose its sale purpose."); return false; }
+            }
+        }
+        if (step === 2) {
+            const date = form.elements.transaction_date, location = form.elements.selling_barangay_id;
+            if (!date.value || date.value > new Date().toLocaleDateString("en-CA")) { alert("Please enter a valid sale date. Future dates are not allowed."); date.focus(); return false; }
+            if (!location.value) { alert("Please choose the barangay where the sale happened."); location.focus(); return false; }
+        }
+        if (step === 3) {
+            const phone = form.elements.buyer_phone.value.trim();
+            if (phone && !/^(09\d{9}|\+639\d{9})$/.test(phone)) { alert("Use a valid Philippine mobile number (09XXXXXXXXX or +639XXXXXXXXX), or leave it blank."); form.elements.buyer_phone.focus(); return false; }
+        }
+        return true;
+    }
+    function renderReview() {
+        const items = [...state.rows.values()].map((r) => {
+            const animal = state.livestock.find((a) => String(a.id) === r.livestock.value);
+            const name = [animal?.species?.name || animal?.species_name || "Livestock", animal?.breed?.name || animal?.breed_name].filter(Boolean).join(" · ");
+            return `<div class="sale-review-row"><div><strong>${escapeHtml(name)}</strong><small>${r.purpose.value === "slaughter" ? "Slaughter" : "Breeding"}</small></div><strong>${money.format(Number(r.price.value))}</strong></div>`;
+        }).join("");
+        const date = form.elements.transaction_date.value;
+        reviewElement.innerHTML = `<div class="sale-review-group"><h3>Livestock sold</h3>${items}<div class="sale-review-row sale-review-total"><strong>Total received</strong><strong>${totalElement.textContent}</strong></div></div>
+            <div class="sale-review-group"><h3>Sale details</h3><p><strong>Date:</strong> ${escapeHtml(date)}</p><p><strong>Where:</strong> ${escapeHtml(form.elements.selling_barangay_id.selectedOptions[0]?.textContent || "Not selected")}</p></div>
+            <div class="sale-review-group"><h3>Buyer information</h3><p><strong>Name:</strong> ${escapeHtml(form.elements.buyer_name.value.trim() || "Not provided")}</p><p><strong>Mobile:</strong> ${escapeHtml(form.elements.buyer_phone.value.trim() || "Not provided")}</p></div>`;
+    }
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+    function showStep(step) {
+        state.step = step;
+        root.querySelectorAll(".sale-step").forEach((section) => { const active = Number(section.dataset.step) === step; section.hidden = !active; section.classList.toggle("active", active); });
+        root.querySelectorAll(".sale-progress-step").forEach((node) => { const n = Number(node.dataset.progress); node.classList.toggle("active", n === step); node.classList.toggle("complete", n < step); });
+        backButton.hidden = step === 1; nextButton.hidden = step === 4; submitButton.hidden = step !== 4; saveButton.hidden = false;
+        if (step === 4) renderReview();
+        root.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    function buildPayload() {
+        return {
+            buyer_name: form.elements.buyer_name.value.trim() || null,
+            buyer_phone: form.elements.buyer_phone.value.trim() || null,
+            transaction_date: form.elements.transaction_date.value,
+            selling_barangay_id: form.elements.selling_barangay_id.value,
+            remarks: form.elements.remarks.value.trim() || null,
+            items: [...state.rows.values()].map((r) => ({ livestock_id: r.livestock.value, actual_selling_price: Number(r.price.value), sale_purpose: r.purpose.value }))
+        };
+    }
+    async function saveDraft() {
+        if (!validateStep(1) || !validateStep(2) || !validateStep(3)) return;
+        const payload = buildPayload();
+        const response = state.draftId ? await api.patch(`/farmer/transactions/${encodeURIComponent(state.draftId)}`, payload) : await api.post("/farmer/transactions", payload);
+        const transaction = unwrap(response);
+        if (!transaction?.id) throw new Error("The draft could not be confirmed by the server.");
+        state.draftId = transaction.id; saveButton.textContent = "Save changes";
+    }
+    async function submitSale(event) {
+        event.preventDefault(); if (state.busy || state.submitted || state.uncertain) return;
+        if (![1,2,3].every(validateStep)) return;
+        const auctionAnimals = selectedAuctionRegisteredAnimals();
+        if (auctionAnimals.length) {
+            const names = auctionAnimals.map((animal) => `${animal.species?.name || animal.species_name || "Livestock"} (${String(animal.id).slice(0, 8)})`).join(", ");
+            const confirmed = window.confirm(`The following livestock are currently registered for an auction: ${names}.
 
-    async function loadValuations(row) {
-        const livestockId = row.livestock.value;
-
-        row.requestVersion += 1;
-        const version = row.requestVersion;
-
-        row.valuation.disabled = true;
-        row.valuation.replaceChildren(new Option("Select livestock first", ""));
-
-        if (!livestockId) return;
-
-        row.valuation.replaceChildren(new Option("Loading valuations...", ""));
-
+Submitting this sale will immediately remove these animals from the auction list while the LGU Authority reviews the transaction. If the sale is rejected and the auction is still open, the registration can be restored. Continue?`);
+            if (!confirmed) return;
+        }
+        setBusy(true);
         try {
-            const response = await api.get(
-                `/farmer/livestock/${encodeURIComponent(livestockId)}/valuations`,
-                {
-                    params: { page: 1 },
-                },
-            );
+            await saveDraft();
+            await api.post(`/farmer/transactions/${encodeURIComponent(state.draftId)}/submit`);
+            state.submitted = true;
+            form.innerHTML = `<div class="sale-success"><div class="sale-success-icon">✓</div><h2>Your sale has been recorded!</h2><p>Your transaction has been sent to the Municipal Agriculture Office for verification. You can check its progress in My Transactions.</p><span class="sale-status">Pending Verification</span><a class="sale-btn sale-btn-primary" href="/transactions">View my transactions</a></div>`;
+        } catch (e) { alert(errorMessage(e)); }
+        finally { setBusy(false); }
+    }
+    async function loadDraft() {
+        const id = new URLSearchParams(location.search).get("draft"); if (!id) return;
+        const response = await api.get(`/farmer/transactions/${encodeURIComponent(id)}`), draft = unwrap(response);
+        if (draft.status !== "draft" || draft.source !== "farmer") throw new Error("Only your own saved draft can be edited.");
+        state.draftId = draft.id;
+        form.elements.buyer_name.value = draft.buyer_name || ""; form.elements.buyer_phone.value = draft.buyer_phone || "";
+        form.elements.transaction_date.value = draft.transaction_date ? String(draft.transaction_date).slice(0,10) : "";
+        form.elements.selling_barangay_id.value = draft.selling_barangay_id || draft.selling_barangay?.id || form.elements.selling_barangay_id.value || ""; form.elements.remarks.value = draft.remarks || "";
+        state.rows.clear(); itemsContainer.replaceChildren();
 
-            if (
-                version !== row.requestVersion ||
-                row.livestock.value !== livestockId
-            ) {
-                return;
+        // A saved draft reserves its livestock against duplicate transactions.
+        // The normal available-livestock endpoint may therefore omit those animals.
+        // Rehydrate the exact livestock attached to this draft before rebuilding rows,
+        // otherwise the select cannot restore the saved livestock_id.
+        const draftItems = Array.isArray(draft.items) ? draft.items : [];
+        const knownLivestockIds = new Set(state.livestock.map((animal) => String(animal.id)));
+        draftItems.forEach((item) => {
+            const animal = item.livestock || item.livestock_record || null;
+            if (animal?.id && !knownLivestockIds.has(String(animal.id))) {
+                state.livestock.push(animal);
+                knownLivestockIds.add(String(animal.id));
             }
+        });
 
-            const valuations = collection(unwrap(response));
-
-            row.valuation.replaceChildren(
-                new Option("Select FPC valuation", ""),
-            );
-
-            for (const valuation of valuations) {
-                const amount = money.format(Number(valuation.estimated_value));
-
-                const date = valuation.created_at
-                    ? new Date(valuation.created_at).toLocaleDateString("en-PH")
-                    : "";
-
-                row.valuation.add(
-                    new Option(
-                        `${amount}${date ? ` — ${date}` : ""}`,
-                        valuation.id,
-                    ),
-                );
-            }
-
-            if (valuations.length === 0) {
-                row.valuation.replaceChildren(
-                    new Option("No saved valuation found", ""),
-                );
-            } else {
-                row.valuation.disabled = false;
-            }
-        } catch (error) {
-            if (version !== row.requestVersion) return;
-
-            console.error("[Transactions] Valuation request failed:", error);
-
-            row.valuation.replaceChildren(
-                new Option("Unable to load valuations", ""),
-            );
-
-            showAlert(getErrorMessage(error));
-        }
+        draftItems.forEach((item) => addRow(item));
+        if (!state.rows.size) addRow();
+        refreshOptions();
+        saveButton.hidden = false; saveButton.textContent = "Save changes"; showStep(1); alert("Your saved sale has been reopened. Continue editing and submit when ready.", "success");
     }
 
-    // --------------------------------------------------
-    // Transaction item rows
-    // --------------------------------------------------
-
-    function addRow() {
-        if (
-            state.busy ||
-            state.draftId ||
-            state.uncertain ||
-            state.rows.size >= 50
-        ) {
+    addButton.addEventListener("click", () => addRow());
+    nextButton.addEventListener("click", () => { if (validateStep(state.step)) showStep(Math.min(4, state.step + 1)); });
+    backButton.addEventListener("click", () => showStep(Math.max(1, state.step - 1)));
+    saveButton.addEventListener("click", async () => { if (state.busy) return; setBusy(true); try { await saveDraft(); alert("Your sale has been saved. You can continue later from My Transactions.", "success"); } catch(e) { alert(errorMessage(e)); } finally { setBusy(false); } });
+    form.addEventListener("submit", (event) => {
+        // Enter advances the guided form instead of unexpectedly saving/submitting.
+        // Only the final review step may submit the transaction.
+        if (state.step < 4) {
+            event.preventDefault();
+            if (validateStep(state.step)) showStep(Math.min(4, state.step + 1));
             return;
         }
-
-        const id = ++state.nextRowId;
-
-        const element = document.createElement("div");
-        element.className = "sale-item";
-
-        element.innerHTML = `
-            <div class="sale-item-header">
-                <strong>Livestock Item</strong>
-                <button type="button" class="sale-remove">
-                    Remove
-                </button>
-            </div>
-
-            <div class="sale-grid">
-                <label>
-                    Registered livestock
-                    <select class="sale-livestock" required>
-                        <option value="">Select livestock</option>
-                    </select>
-                </label>
-
-                <label>
-                    Saved FPC valuation
-                    <select class="sale-valuation" required disabled>
-                        <option value="">Select livestock first</option>
-                    </select>
-                </label>
-
-                <label>
-                    Actual selling price (PHP)
-                    <input
-                        class="sale-price"
-                        type="number"
-                        min="0.01"
-                        max="999999999999.99"
-                        step="0.01"
-                        placeholder="0.00"
-                        required
-                    >
-                </label>
-            </div>
-        `;
-
-        const row = {
-            element,
-            livestock: element.querySelector(".sale-livestock"),
-            valuation: element.querySelector(".sale-valuation"),
-            price: element.querySelector(".sale-price"),
-            remove: element.querySelector(".sale-remove"),
-            requestVersion: 0,
-        };
-
-        state.rows.set(id, row);
-        itemsContainer.appendChild(element);
-
-        row.livestock.addEventListener("change", () => {
-            refreshLivestockOptions();
-            loadValuations(row);
-        });
-
-        row.price.addEventListener("input", updateTotal);
-
-        row.remove.addEventListener("click", () => {
-            if (state.busy || state.draftId || state.uncertain) return;
-
-            state.rows.delete(id);
-            element.remove();
-
-            refreshLivestockOptions();
-            updateTotal();
-        });
-
-        refreshLivestockOptions();
-        updateTotal();
-    }
-
-    // --------------------------------------------------
-    // Payload
-    // --------------------------------------------------
-
-    function buildPayload() {
-        const data = new FormData(form);
-
-        const items = [...state.rows.values()].map((row) => ({
-            livestock_id: row.livestock.value,
-            valuation_id: row.valuation.value,
-            actual_selling_price: Number(row.price.value),
-        }));
-
-        if (items.length === 0) {
-            throw new Error("Add at least one livestock item.");
-        }
-
-        if (
-            items.some(
-                (item) =>
-                    !item.livestock_id ||
-                    !item.valuation_id ||
-                    !Number.isFinite(item.actual_selling_price) ||
-                    item.actual_selling_price <= 0,
-            )
-        ) {
-            throw new Error(
-                "Complete the livestock, valuation, and selling price fields.",
-            );
-        }
-
-        return {
-            buyer_name: String(data.get("buyer_name") || "").trim(),
-            buyer_phone: String(data.get("buyer_phone") || "").trim(),
-            transaction_date: String(data.get("transaction_date") || ""),
-            remarks: String(data.get("remarks") || "").trim() || null,
-            items,
-        };
-    }
-
-    // --------------------------------------------------
-    // Save and submit
-    // --------------------------------------------------
-
-    async function createDraft() {
-        if (state.draftId) return state.draftId;
-
-        const payload = buildPayload();
-
-        console.log("[Transactions] Creating draft...");
-
-        const response = await api.post("/farmer/transactions", payload);
-
-        const transaction = unwrap(response);
-
-        if (!transaction?.id) {
-            state.uncertain = true;
-
-            throw new Error(
-                "The server did not return a transaction ID. Check the database before retrying.",
-            );
-        }
-
-        state.draftId = transaction.id;
-
-        console.log("[Transactions] Draft created:", state.draftId);
-
-        lockForm();
-
-        return state.draftId;
-    }
-
-    async function submitDraft() {
-        if (!state.draftId) {
-            throw new Error("Save the transaction draft first.");
-        }
-
-        console.log("[Transactions] Submitting draft:", state.draftId);
-
-        await api.post(
-            `/farmer/transactions/${encodeURIComponent(state.draftId)}/submit`,
-        );
-
-        state.submitted = true;
-
-        console.log("[Transactions] Submission successful");
-    }
-
-    async function runAction(shouldSubmit) {
-        if (state.busy || state.submitted || state.uncertain) return;
-
-        clearAlert();
-
-        if (!state.draftId && !form.reportValidity()) return;
-
-        setBusy(true);
-
-        let operation = "draft";
-
-        try {
-            if (!state.draftId) {
-                await createDraft();
-            }
-
-            if (shouldSubmit) {
-                operation = "submit";
-
-                await submitDraft();
-
-                showAlert(
-                    "Transaction submitted successfully. Buyer confirmation SMS has been queued.",
-                    "success",
-                );
-
-                submitButton.textContent = "Submitted";
-            } else {
-                showAlert(
-                    "Draft saved successfully. You can now submit it for buyer confirmation.",
-                    "success",
-                );
-            }
-        } catch (error) {
-            console.error("[Transactions] Action failed:", error);
-
-            // Network errors may occur after the server has
-            // already committed the transaction.
-            if (!error?.response) {
-                state.uncertain = true;
-
-                showAlert(
-                    operation === "submit"
-                        ? "Submission result is uncertain. Check the transaction status before retrying."
-                        : "Draft creation result is uncertain. Check existing transactions before retrying.",
-                );
-            } else {
-                showAlert(getErrorMessage(error));
-            }
-        } finally {
-            setBusy(false);
-
-            if (state.draftId) {
-                saveButton.disabled = true;
-                addButton.disabled = true;
-            }
-
-            if (state.submitted || state.uncertain) {
-                submitButton.disabled = true;
-            }
-        }
-    }
-
-    // --------------------------------------------------
-    // Events
-    // --------------------------------------------------
-
-    addButton.addEventListener("click", addRow);
-
-    saveButton.addEventListener("click", () => {
-        runAction(false);
+        submitSale(event);
     });
 
-    form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        runAction(true);
-    });
-
-    // --------------------------------------------------
-    // Initialization
-    // --------------------------------------------------
-
-    async function initialize() {
-        console.log("[Transactions] Initializing page...");
-
-        const dateInput = form.querySelector('[name="transaction_date"]');
-
-        if (dateInput && !dateInput.value) {
-            const now = new Date();
-            const localDate = new Date(
-                now.getTime() - now.getTimezoneOffset() * 60000,
-            );
-
-            dateInput.value = localDate.toISOString().slice(0, 10);
-        }
-
-        // Render immediately, regardless of API success.
+    (async () => {
+        const date = form.elements.transaction_date; date.value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,10); date.max = date.value;
         addRow();
-
-        // Fetch livestock independently.
-        await loadLivestock();
-
-        console.log("[Transactions] Initialization complete");
-    }
-
-    initialize();
+        try { await loadBarangays(); await loadLivestock(); await loadDraft(); } catch(e) { alert(errorMessage(e)); }
+    })();
 }
 
-// Wait until the HTML is available.
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initializeTransactionPage, {
-        once: true,
-    });
-} else {
-    initializeTransactionPage();
-}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeTransactionPage, { once: true });
+else initializeTransactionPage();
