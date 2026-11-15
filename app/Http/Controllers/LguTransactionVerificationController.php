@@ -233,7 +233,7 @@ class LguTransactionVerificationController extends Controller
             'data' => $record,
         ]);
     }
-
+    
     public function approve(
         Request $request,
         string $transaction,
