@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 // Keep auction lifecycle statuses synchronized automatically.
 Schedule::command('auctions:sync-statuses')->everyMinute()->withoutOverlapping();
+Schedule::command('buyers:expire-temporary-accounts')->daily();

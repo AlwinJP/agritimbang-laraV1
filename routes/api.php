@@ -12,6 +12,7 @@ use App\Http\Controllers\{
     BarangayGeometryController,
     BreedController,
     BuyerConfirmationController,
+    BuyerInterestController,
     DashboardController,
     FarmerDirectoryController,
     FarmerDashboardController,
@@ -165,6 +166,19 @@ Route::prefix('buyer-confirmations')
             BuyerConfirmationController::class,
             'dispute'
         ]);
+    });
+
+Route::prefix('buyer-interest')
+    ->group(function () {
+        Route::get('auction/{schedule}', [BuyerInterestController::class, 'listing']);
+        Route::post('auction/{schedule}/create', [BuyerInterestController::class, 'store'])
+            ->middleware('throttle:10,1');
+        Route::post('auction/{schedule}/login', [BuyerInterestController::class, 'login'])
+            ->middleware('throttle:10,1');
+        Route::post('auction/{schedule}/update', [BuyerInterestController::class, 'update'])
+            ->middleware('throttle:10,1');
+        Route::get('auction/{schedule}/buyers/{buyer}/pdf', [BuyerInterestController::class, 'pdf'])
+            ->name('buyer-interest.pdf');
     });
 
 /*

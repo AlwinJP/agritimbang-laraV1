@@ -18,6 +18,12 @@ Route::view('/login', 'auth.login')
 Route::view('/register', 'auth.register')
     ->name('register');
 
+Route::get('/forsale-livestocks', [\App\Http\Controllers\BuyerInterestController::class, 'publicIndex'])
+    ->name('forsale');
+
+Route::get('/auction-interest/{schedule}', [\App\Http\Controllers\BuyerInterestController::class, 'showPage'])
+    ->name('buyer-interest.index');
+
 Route::view('/verify-email', 'auth.verify-email')
     ->name('verification.notice');
 

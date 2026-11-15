@@ -141,6 +141,7 @@ export default defineConfig({
                 "resources/js/pages/farmer-auctions.js",
                 "resources/js/pages/farmer-auction-detail.js",
                 "resources/js/pages/farmer-auction-register.js",
+                "resources/js/pages/buyer-interest.js",
 
                 // GIS
                 "resources/js/pages/lgu-gis-monitoring.js",

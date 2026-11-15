@@ -18,10 +18,11 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RoleSeeder::class,
             BariliMunicipalitySeeder::class,
+            MunicipalitySeeder::class,
             SpeciesSeeder::class,
             FormulaProfileSeeder::class,
             BreedSeeder::class,
-
+            DemoUsersSeeder::class,
         ]);
     }
 }
